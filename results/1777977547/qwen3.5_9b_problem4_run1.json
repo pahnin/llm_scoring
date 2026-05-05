@@ -1,0 +1,1 @@
+{"content": "1. **Regression:** Cache misses do not populate the cache, causing repeated computation for identical keys.\n2. **Explanation:** The `get` function returns the computed value but omits the assignment `cache[key] = value`.\n3. **Fix:** Add `cache[key] = compute(key);` before the `return` statement in `cacheManager.js`.\n", "usage": {"total_tokens": 0}}
