@@ -1,0 +1,33 @@
+A caching system was partially refactored.
+
+--- Old code
+function getData(key) {
+  if (cache[key]) {
+    return cache[key];
+  }
+
+  var value = compute(key);
+  cache[key] = value;
+  return value;
+}
+
+--- New code
+function getData(key) {
+  return cacheManager.get(key);
+}
+
+--- cacheManager.js
+var cache = {};
+
+function get(key) {
+  if (cache[key]) {
+    return cache[key];
+  }
+
+  return compute(key);
+}
+
+Task:
+1. Identify the regression introduced by this refactor
+2. Explain why behavior changed
+3. Provide minimal fix

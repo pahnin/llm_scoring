@@ -1,0 +1,28 @@
+You are reviewing backend + frontend integration.
+
+--- Backend (Node.js)
+app.get("/api/user/:id", (req, res) => {
+  res.json({
+    id: req.params.id,
+    name: "Alice",
+    is_active: true
+  });
+});
+
+--- Frontend
+function renderUser(user) {
+  if (user.isActive) {
+    showBadge("Active");
+  }
+
+  document.getElementById("name").innerText = user.fullName;
+}
+
+fetch("/api/user/123")
+  .then(res => res.json())
+  .then(user => renderUser(user));
+
+Task:
+1. Identify ALL bugs caused by contract mismatch
+2. Explain why they fail (not just “wrong field”)
+3. Suggest fixes (frontend or backend)

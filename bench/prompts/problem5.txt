@@ -1,0 +1,23 @@
+You are debugging a message processing system.
+
+function processMessages(messages) {
+  let lastTimestamp = 0;
+
+  return messages.map(msg => {
+    if (msg.timestamp < lastTimestamp) {
+      msg.timestamp = lastTimestamp;
+    }
+
+    lastTimestamp = msg.timestamp;
+    return msg;
+  });
+}
+
+Observed issue:
+- Sometimes messages appear out of order after processing
+- Happens only when input array is reused elsewhere
+
+Task:
+1. Identify ALL bugs
+2. Explain why mutation causes issues
+3. Provide a correct fix without changing function signature

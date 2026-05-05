@@ -1,0 +1,28 @@
+You are debugging a JavaScript function that fetches user data and updates UI state.
+
+function loadUserProfile(userId) {
+  state.loading = true;
+
+  fetch(`/api/user/${userId}`)
+    .then(res => res.json())
+    .then(user => {
+      state.user = user;
+    });
+
+  fetch(`/api/user/${userId}/posts`)
+    .then(res => res.json())
+    .then(posts => {
+      state.posts = posts;
+    });
+
+  state.loading = false;
+}
+
+Observed issue:
+- UI sometimes shows loading=false before data is ready
+- Occasionally shows mismatched user + posts
+
+Task:
+1. Identify ALL bugs
+2. Explain the race conditions precisely
+3. Provide a correct fix without changing API shape

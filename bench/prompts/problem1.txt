@@ -1,0 +1,58 @@
+You are reviewing a refactor in a QML + JavaScript application.
+
+The goal of the refactor was to move logic from Main.qml into ProviderLogic.js.
+
+--- Main.qml (new)
+function sendChatRequest() {
+  root.requestConversationIndex = root.activeConversationIndex;
+
+  var conv = root.conversations[root.activeConversationIndex];
+  var memory = ensureMemory(root.activeConversationIndex);
+
+  var commandData = ProviderLogic.buildChatCommand(
+    openaiBaseUrl,
+    apiKey,
+    model,
+    systemPrompt,
+    memory,
+    temperature
+  );
+
+  chatProcess.command = commandData.args;
+  chatProcess.running = true;
+}
+
+--- ProviderLogic.js (new)
+function buildChatCommand(endpointUrl, apiKey, model, systemPrompt, memory, temperature) {
+  var messages = [];
+
+  var history = buildHistoryContext(conv, memory);
+
+  messages = messages.concat(history);
+
+  return {
+    url: endpointUrl + "/v1/chat/completions",
+    args: ["curl", "-X", "POST"]
+  };
+}
+
+function buildHistoryContext(conv, memory) {
+  var history = [];
+
+  if (memory.summary) {
+    history.push({
+      role: "system",
+      content: memory.summary
+    });
+  }
+
+  history = history.concat(conv.messages.slice(-2));
+
+  return history;
+}
+
+Task:
+1. Identify ALL real bugs introduced by this refactor
+2. Explain why they break at runtime
+3. Provide minimal fixes
+4. Do NOT mention style issues
