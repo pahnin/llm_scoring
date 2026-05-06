@@ -18,6 +18,75 @@ EMBEDDING_API_URL = "http://localhost:11434/api/embeddings"
 EMBEDDING_MODEL = "nomic-embed-text:latest"
 
 
+EXPECTED_PROBLEM_1 = [
+    "conv is undefined in buildChatCommand",
+    "conv not passed as parameter to buildChatCommand",
+    "buildHistoryContext depends on conv but it is missing",
+]
+
+OPTIONAL_PROBLEM_1 = [
+    "runtime reference error for conv",
+    "history construction fails due to missing conv",
+]
+
+
+EXPECTED_PROBLEM_2 = [
+    "loading set to false before async calls complete",
+    "race condition between user and posts fetch",
+    "no synchronization between parallel requests",
+]
+
+OPTIONAL_PROBLEM_2 = [
+    "state updates happen independently causing mismatch",
+    "ui shows inconsistent data due to async timing",
+]
+
+EXPECTED_PROBLEM_3 = [
+    "is_active vs isActive mismatch",
+    "name vs fullName mismatch",
+]
+
+OPTIONAL_PROBLEM_3 = [
+    "frontend expects camelCase but backend returns snake_case",
+    "undefined values cause ui rendering issues",
+]
+
+EXPECTED_PROBLEM_4 = [
+    "computed value is not stored in cache",
+]
+
+OPTIONAL_PROBLEM_4 = [
+    "cache miss always recomputes value",
+    "cache behavior lost after refactor",
+]
+
+EXPECTED_PROBLEM_5 = [
+    "input messages are mutated",
+    "shared state causes side effects",
+    "function modifies original array elements",
+]
+
+OPTIONAL_PROBLEM_5 = [
+    "timestamp overwritten mutates original objects",
+    "reusing array leads to inconsistent ordering",
+]
+
+EXPECTED_MAP = {
+    1: EXPECTED_PROBLEM_1,
+    2: EXPECTED_PROBLEM_2,
+    3: EXPECTED_PROBLEM_3,
+    4: EXPECTED_PROBLEM_4,
+    5: EXPECTED_PROBLEM_5,
+}
+
+OPTIONAL_MAP = {
+    1: OPTIONAL_PROBLEM_1,
+    2: OPTIONAL_PROBLEM_2,
+    3: OPTIONAL_PROBLEM_3,
+    4: OPTIONAL_PROBLEM_4,
+    5: OPTIONAL_PROBLEM_5,
+}
+
 # =========================
 # DB INIT
 # =========================
@@ -65,6 +134,15 @@ def init_db(conn):
         run_number INTEGER,
         relationship_type TEXT DEFAULT 'supports'
     );
+
+    CREATE TABLE IF NOT EXISTS run_scores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_name TEXT,
+        problem_id INTEGER,
+        run_number INTEGER,
+        task_completion REAL,
+        consistency_hint REAL DEFAULT 0
+    );
     """)
 
     conn.commit()
@@ -76,6 +154,23 @@ def init_db(conn):
 def cosine_sim(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
+def score_task_completion(problem_id, content):
+    content = content.lower()
+
+    expected = EXPECTED_MAP.get(problem_id, [])
+    optional = OPTIONAL_MAP.get(problem_id, [])
+
+    expected_score = fuzzy_match(content, expected)
+    optional_score = fuzzy_match(content, optional)
+
+    if len(expected) == 0:
+        return 0
+
+    # weight expected much higher
+    return (
+        0.8 * (expected_score / len(expected)) +
+        0.2 * (optional_score / max(len(optional), 1))
+    )
 
 def extract_problem_and_run(filename):
     base = filename.replace(".json", "")
@@ -90,31 +185,70 @@ def extract_problem_and_run(filename):
 
     return base, 1, 1
 
+def fuzzy_match(content, expected_items):
+    content = content.lower()
+    score = 0
+
+    for item in expected_items:
+        keywords = item.split()
+        if all(word in content for word in keywords[:2]):  # loose match
+            score += 1
+
+    return score / len(expected_items)
 
 def split_into_facts(content):
-    # Split into sentences instead of arbitrary chunks
+    # remove markdown noise
+    content = re.sub(r'[`*#>-]', ' ', content)
+
+    # split into sentences
     sentences = re.split(r'(?<=[.!?])\s+', content)
 
     facts = []
+    buffer = ""
+
     for s in sentences:
         s = s.strip()
 
-        # keep only meaningful sentences
-        if len(s) < 40:
-            continue
-        if "```" in s:
-            continue
-        if s.lower().startswith(("function", "fetch(", "const ", "let ")):
+        if not s:
             continue
 
-        facts.append(s)
+        # merge short fragments into buffer
+        if len(s) < 40:
+            buffer += " " + s
+            continue
+
+        # flush buffer if exists
+        if buffer:
+            s = buffer + " " + s
+            buffer = ""
+
+        # filter junk
+        if any(x in s.lower() for x in ["```", "function(", "fetch(", "const ", "let "]):
+            continue
+
+        facts.append(s.strip())
 
     return facts
 
 def normalize_fact(f):
     f = f.lower()
-    f = re.sub(r'[`*]', '', f)  # remove markdown
+
+    # remove code + punctuation noise
+    f = re.sub(r'[`*]', '', f)
+    f = re.sub(r'\b\d+\.', '', f)  # remove numbering like "1."
     f = re.sub(r'\s+', ' ', f)
+
+    # normalize common phrases (VERY high ROI)
+    replacements = {
+        "race conditions": "race condition",
+        "asynchronous": "async",
+        "promise.all": "promise all",
+        "loading state": "loading",
+    }
+
+    for k, v in replacements.items():
+        f = f.replace(k, v)
+
     return f.strip()
 
 def is_good_fact(f):
@@ -124,16 +258,26 @@ def is_good_fact(f):
         "```" not in f
     )
 
-def find_similar_fact(conn, embedding, threshold=0.9):
+def find_similar_fact(conn, embedding, threshold=0.75):
     cursor = conn.cursor()
 
-    cursor.execute("SELECT id, embedding FROM facts")
+    cursor.execute("SELECT id, embedding FROM facts LIMIT 5000")
     rows = cursor.fetchall()
+
+    best_id = None
+    best_sim = 0
 
     for fid, emb_blob in rows:
         existing = np.frombuffer(emb_blob, dtype=np.float32)
-        if cosine_sim(existing, embedding) > threshold:
-            return fid
+
+        sim = cosine_sim(existing, embedding)
+
+        if sim > best_sim:
+            best_sim = sim
+            best_id = fid
+
+    if best_sim > threshold:
+        return best_id
 
     return None
 
@@ -277,11 +421,22 @@ def build_kg():
             get_or_create_run(conn, model, run)
 
             content = data.get("content", "")
+
+            task_score = score_task_completion(problem, content)
+            print(f"✅ Task score: {task_score:.2f} | Model: {model} | Problem: {problem}")
+
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO run_scores (model_name, problem_id, run_number, task_completion)
+                VALUES (?, ?, ?, ?)
+            """, (model, problem_id, run, task_score))
+            conn.commit()
+
             facts = split_into_facts(data.get("content", ""))
 
             print(f"📝 {filename} → {len(facts)} facts")
-            print("RAW CONTENT:", repr(content[:200]))
-            print("FACTS:", facts[:5])
+            # print("RAW CONTENT:", repr(content[:200]))
+            # print("FACTS:", facts[:5])
 
             for f in facts:
                 insert_fact(conn, f, problem_id, model, run)
@@ -316,39 +471,71 @@ def generate_rankings(problem_id=None):
     WITH fact_stats AS (
         SELECT 
             f.id,
-            f.fact_text,
             COUNT(DISTINCT r.model_name) AS model_support
         FROM facts f
         JOIN relationships r ON f.id = r.fact_id
-        {problem_filter}
         GROUP BY f.id
     ),
-    model_stats AS (
+
+    model_fact_stats AS (
         SELECT
             r.model_name,
             COUNT(*) AS total_facts,
             COUNT(DISTINCT f.fact_text) AS unique_facts,
-            SUM(CASE WHEN fs.model_support >= 2 THEN 1 ELSE 0 END) AS consensus_facts
+            SUM(CASE WHEN fs.model_support >= 2 THEN 1 ELSE 0 END) AS agreement_facts
         FROM facts f
         JOIN relationships r ON f.id = r.fact_id
         JOIN fact_stats fs ON fs.id = f.id
-        {problem_filter}
         GROUP BY r.model_name
+    ),
+
+    task_scores AS (
+        SELECT
+            model_name,
+            AVG(task_completion) AS task_completion_score
+        FROM run_scores
+        GROUP BY model_name
+    ),
+
+    run_variance AS (
+        SELECT
+            model_name,
+            problem_id,
+            AVG(task_completion) AS avg_score,
+            (MAX(task_completion) - MIN(task_completion)) AS variance
+        FROM run_scores
+        GROUP BY model_name, problem_id
+    ),
+
+    consistency AS (
+        SELECT
+            model_name,
+            AVG(1.0 - variance) AS consistency_score
+        FROM run_variance
+        GROUP BY model_name
     )
+
     SELECT
-        model_name,
+        m.model_name,
         total_facts,
         unique_facts,
-        ROUND(CAST(unique_facts AS FLOAT) / total_facts, 3) AS uniqueness_ratio,
-        consensus_facts,
-        ROUND(CAST(consensus_facts AS FLOAT) / total_facts, 3) AS consensus_ratio,
+        ROUND(CAST(unique_facts AS FLOAT)/total_facts, 3) AS uniqueness_ratio,
+        ROUND(ts.task_completion_score, 3) AS task_score,
+        ROUND(c.consistency_score, 3) AS consistency_score,
+
         ROUND(
-            (0.4 * (CAST(unique_facts AS FLOAT) / total_facts)) +
-            (0.6 * (CAST(consensus_facts AS FLOAT) / total_facts)),
+            (0.5 * ts.task_completion_score) +
+            (0.3 * c.consistency_score) +
+            (0.15 * (CAST(unique_facts AS FLOAT)/total_facts)) +
+            (0.05 * (CAST(agreement_facts AS FLOAT)/total_facts)),
             3
-        ) AS score
-    FROM model_stats
-    ORDER BY score DESC;
+        ) AS final_score
+
+    FROM model_fact_stats m
+    JOIN task_scores ts ON m.model_name = ts.model_name
+    JOIN consistency c ON m.model_name = c.model_name
+
+    ORDER BY final_score DESC;
     """
 
     cursor.execute(query, params * 2 if problem_id is not None else ())

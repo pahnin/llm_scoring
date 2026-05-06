@@ -1,85 +1,120 @@
-# LLM Benchmark Suite
+LLM Benchmark Suite
 
-This repository contains a Bash script (`score_llms.sh`) designed to run a small set of qualitative benchmark prompts against a variety of locally-hosted Large Language Models (LLMs) accessed via OLLAMA. The goal is to compare how each model performs on a handful of real-world coding and reasoning tasks and to collect both raw responses and simple latency/token statistics.
+This project evaluates how well different locally-run AI models (LLMs) solve real-world coding and debugging problems.
 
-## Project Overview
+Instead of just measuring speed or token usage, it focuses on something more important:
 
-The benchmark evaluates LLMs across 5 distinct problems, measuring their ability to generate coherent and correct responses.
+👉 Did the model actually understand the problem and give a correct, consistent answer?
 
-### Project Layout
-This repository contains a simple Bash script that runs a small set of qualitative benchmark prompts against a variety of locally‑hosted LLMs (via OLLAMA).  The goal is to compare how each model performs on a handful of real‑world coding and reasoning tasks and to collect both raw responses and simple latency/token statistics.
-├── bench/
-## Project layout
-│   └── <timestamp>/      # Directory for each benchmark session (e.g., results/1777977547/)
-```
-├── bench
-│   └── prompts          # .txt files – one per benchmark problem
-├── results                # per‑run JSON output + metrics.csv
-│   └── <timestamp>/      # a directory per benchmark session
-├── score_llms.sh          # driver script
-└── README.md              # you are reading
-```
-2.  **Results Directory (`results/<timestamp>/`):** Contains all output for a single benchmark run.
-- `bench/prompts/*.txt` – a problem description.  The script will send the file content as a user message.
-- `results/<timestamp>/metrics.csv` – one row per run with *model, problem, run, latency, tokens, success, http_code*.
-- `results/<timestamp>/*.json` – the raw streamed response for each run.  The JSON contains two keys:
-  ```json
-  {
-    "content": "…",          // the decoded LLM reply
-    "usage": {"total_tokens": 123}
-  }
-  ```
+🎯 What This Benchmark Measures
 
-## Prerequisites
+Each model is tested on 5 practical programming problems (debugging, async bugs, API mismatches, etc.).
 
-- Bash (any recent version)
-- `curl` and `jq` installed
-- OLLAMA running locally (default port 11434).  Set the environment variable `OLLAMA_URL` if you use a different address.
+For every response, we evaluate:
 
-## Running the benchmark
+1. ✅ Task Completion (Accuracy)
+Did the model identify the actual bugs?
+Did it explain why they happen?
+Did it suggest correct fixes?
 
-```bash
-# From the repository root
+This is the most important signal.
+
+2. 🔁 Consistency
+If we ask the same question 3 times…
+Does the model give similar quality answers, or does it fluctuate?
+
+High consistency = reliable model
+Low consistency = unpredictable model
+
+3. 🧠 Uniqueness (Reasoning Depth)
+Does the model produce meaningful insights, or repeat generic patterns?
+Measures diversity of useful “facts” extracted from answers
+4. 🤝 Agreement (Optional Signal)
+Do multiple models agree on the same facts?
+Helps detect widely “correct” reasoning patterns
+🧮 Final Score Formula
+
+Each model gets a combined score:
+
+Final Score =
+  50% Task Completion (accuracy)
++ 30% Consistency
++ 15% Uniqueness
++  5% Agreement
+
+👉 This heavily favors correctness + reliability, not verbosity.
+
+📊 Latest Results
+Model                          | Tot | Uniq | U%   | Cons | C%   | Score
+--------------------------------------------------------------------------------
+ministral-3_14b                | 139 |   72 | 0.518 | 0.383 | 0.934 | 0.586
+gemma4_e2b                     | 115 |   58 | 0.504 | 0.311 | 0.892 | 0.534
+devstral-small-2_24b           | 127 |   51 | 0.402 | 0.303 | 0.720 | 0.468
+deepseek-coder-v2_16b          | 133 |   67 | 0.504 | 0.191 | 0.812 | 0.450
+qwen3.5_9b                     | 169 |   66 | 0.391 | 0.112 | 0.810 | 0.389
+🧾 How to Read This Table
+Tot → Total reasoning facts extracted from answers
+Uniq → Unique facts (less repetition = better reasoning)
+U% → Uniqueness ratio
+Cons → Stability across runs (higher = more reliable)
+C% → Agreement with other models
+Score → Final weighted score
+🔍 Key Takeaways
+🥇 ministral-3_14b
+Best overall performer
+Strong balance of correctness + consistency
+Most reliable for real-world use
+🥈 gemma4_e2b
+Very good accuracy
+Slightly less consistent
+Strong alternative
+🥉 devstral-small-2_24b
+Good but uneven
+High variance across runs
+⚖️ deepseek-coder-v2_16b
+Produces rich insights (high uniqueness)
+But inconsistent, which hurts reliability
+⚠️ qwen3.5_9b
+Generates lots of output
+But low consistency and weaker correctness signals
+⚠️ Important Notes
+This is a small benchmark (5 problems) — results are directional, not absolute
+Scoring uses heuristics + fuzzy matching, not perfect grading
+Models are evaluated on reasoning quality, not just output length
+▶️ How to Run
 bash score_llms.sh
-```
+python build_kg.py
 
-The script will:
-1. Warm‑up each model.
-2. Iterate over every prompt.
-3. Run each prompt *RUNS* times (default = 3) and capture latency, token usage and raw response.
-4. Store all results under `results/<unix‑timestamp>/`.
+This will:
 
-You can customize the list of models or the number of runs by editing the top of `score_llms.sh`.
+Run all models on all problems
+Store raw outputs in results/
+Build a knowledge graph of extracted facts
+Generate rankings
+📂 Project Structure
+bench/prompts/        → Benchmark problems
+results/<timestamp>/  → Raw model outputs
+metrics.csv           → Latency + token stats
+build_kg.py           → Scoring + ranking engine
+🧠 Why This Approach?
 
-## Qualitative comparison
+Most benchmarks measure:
 
-1. **Open the JSON files** – they are small, human‑readable, and contain the actual text produced by the model.
-   ```bash
-   jq -r '.content' results/1777977547/deepseek-coder-v2_16b_problem1_run1.json
-   ```
-2. **Compare side‑by‑side** – use `diff`, `colordiff`, or any diff viewer to spot differences between runs or between models.
-3. **Look at the `usage.total_tokens`** – gives an idea of how verbose each model was.
-4. **Cross‑reference with `metrics.csv`** – check latency and success flags.
+Speed
+Tokens
+Perplexity
 
-### Quick‑look script
-You can generate a quick table of responses for a single problem:
+This project instead measures:
 
-```bash
-#!/usr/bin/env bash
-PROBLEM=problem1
-for MODEL in $(ls results/1777977547 | grep "_${PROBLEM}_run1.json" | sed 's/_run1.json//'); do
-  echo -e "\n=== $MODEL ==="
-  jq -r '.content' results/1777977547/${MODEL}_${PROBLEM}_run1.json
-done
-```
+👉 “Would I trust this model to debug real code?”
 
-## Hardware
-
-All results in this repo were produced on an **RTX 5060 TI** with **16 GB VRAM**.  Performance may differ on other GPUs or CPU‑only setups.
-
-## License
+📌 Future Improvements
+Better semantic matching (embeddings instead of keywords)
+Per-problem scoring breakdown
+Automatic ground-truth validation
+Larger benchmark set
+License
 
 MIT – feel free to adapt or extend.
 
-  jq -r '.content' results/$TIMESTAMP/"$MODEL"_$PROBLEM_run1.json
-done
+
