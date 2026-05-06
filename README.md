@@ -9,8 +9,9 @@ Instead of just measuring speed or token usage, it focuses on something more imp
 ---
 
 ## 🎯 What This Benchmark Measures
-
+On RTX 5060 TI 16 GB
 Each model is tested on 5 practical programming problems (debugging, async bugs, API mismatches, etc.).
+Feel free to run this on your GPU and update the problems if you like
 
 For every response, we evaluate:
 
